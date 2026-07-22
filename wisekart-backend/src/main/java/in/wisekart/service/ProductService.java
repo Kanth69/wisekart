@@ -16,4 +16,13 @@ public interface ProductService {
     List<ProductResponse> getActiveProducts();
 
     ProductResponse getActiveProductById(Long id);
+
+    org.springframework.data.domain.Page<ProductResponse> searchProducts(
+            String keyword,
+            Long categoryId,
+            Long brandId,
+            int page,
+            int size,
+            String sortBy,
+            String sortDirection);
 }

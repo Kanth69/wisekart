@@ -15,7 +15,12 @@ import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -112,6 +117,35 @@ public class ProductServiceImpl implements ProductService {
         return toResponse(product);
     }
 
+    @Override
+    public Page<ProductResponse> searchProducts(
+            String keyword,
+            Long categoryId,
+            Long brandId,
+            int page,
+            int size,
+            String sortBy,
+            String sortDirection) {
+        String normalizedKeyword = keyword == null ? null : keyword.trim();
+        if (normalizedKeyword != null && normalizedKeyword.isBlank()) {
+            normalizedKeyword = null;
+        }
+        String normalizedSortBy = sortBy == null ? "createdAt" : sortBy;
+        if (!SUPPORTED_SORT_FIELDS.contains(normalizedSortBy)) {
+            throw new IllegalArgumentException("Unsupported sort field: " + normalizedSortBy);
+        }
+
+        Sort.Direction direction = Sort.Direction.fromString(sortDirection == null ? "DESC" : sortDirection);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(direction, normalizedSortBy));
+
+        Specification<Product> specification = Specification.where(isActive())
+                .and(normalizedKeyword != null ? nameContains(normalizedKeyword) : null)
+                .and(categoryId != null ? categoryIdEquals(categoryId) : null)
+                .and(brandId != null ? brandIdEquals(brandId) : null);
+
+        return productRepository.findAll(specification, pageable).map(this::toResponse);
+    }
+
     private Product getProductById(Long id) {
         return productRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + id));
@@ -125,6 +159,26 @@ public class ProductServiceImpl implements ProductService {
             throw new DuplicateResourceException("A product with this SKU already exists");
         }
     }
+
+    private Specification<Product> isActive() {
+        return (root, query, builder) -> builder.isTrue(root.get("isActive"));
+    }
+
+    private Specification<Product> nameContains(String keyword) {
+        return (root, query, builder) -> builder.like(
+                builder.lower(root.get("name")),
+                "%" + keyword.toLowerCase(Locale.ROOT) + "%");
+    }
+
+    private Specification<Product> categoryIdEquals(Long categoryId) {
+        return (root, query, builder) -> builder.equal(root.get("category").get("id"), categoryId);
+    }
+
+    private Specification<Product> brandIdEquals(Long brandId) {
+        return (root, query, builder) -> builder.equal(root.get("brand").get("id"), brandId);
+    }
+
+    private static final Set<String> SUPPORTED_SORT_FIELDS = Set.of("createdAt", "price", "name", "stock");
 
     private void validatePriceValues(BigDecimal price, BigDecimal discountPrice) {
         if (discountPrice != null && price != null && discountPrice.compareTo(price) > 0) {
